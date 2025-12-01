@@ -14,7 +14,7 @@ func GetTasks(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, gin.H{"tasks": all})
 }
 
-func GetTask(c *gin.Context) {
+func GetTaskByID(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 
 	if err != nil {
