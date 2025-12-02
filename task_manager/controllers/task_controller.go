@@ -10,7 +10,7 @@ import (
 )
 
 func GetTasks(c *gin.Context) {
-	all := data.GetAllTask()
+	all, _ := data.GetAllTask()
 	c.IndentedJSON(http.StatusOK, gin.H{"tasks": all})
 }
 
@@ -42,7 +42,7 @@ func CreateTask(c *gin.Context) {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "Title is required"})
 		return
 	}
-	created := data.CreateTask(newTask)
+	created, _ := data.CreateTask(newTask)
 	c.IndentedJSON(http.StatusCreated, created)
 
 }

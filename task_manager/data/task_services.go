@@ -1,92 +1,124 @@
 package data
 
 import (
+	"context"
 	"errors"
-	"sync"
-	"task_manager/models"
 	"time"
+	"task_manager/models"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
-var (
-	tasksMu sync.RWMutex
-	lastID  = 0
-)
+var(
+	taskCollection *mongo.Collection
+	lastID int)
 
-func GetAllTask() []models.Task {
-	tasksMu.RLock()
-	defer tasksMu.RUnlock()
-
-	copyTasks := make([]models.Task, len(models.Tasks))
-	copy(copyTasks, models.Tasks)
-	return copyTasks
+// Initialize collection reference
+func InitTaskCollection(db *mongo.Database) {
+	taskCollection = db.Collection("tasks")
 }
 
-func GetTaskByID(id int) (models.Task, error) {
-	tasksMu.RLock()
-	defer tasksMu.RUnlock()
+// GetAllTask retrieves all tasks from MongoDB
+func GetAllTask() ([]models.Task, error) {
+	var tasks []models.Task
 
-	for _, task := range models.Tasks {
-		if task.ID == id {
-			return task, nil
-		}
+	cursor, err := taskCollection.Find(context.Background(), bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &tasks)
+	if err != nil {
+		return nil, err
 	}
 
-	return models.Task{}, errors.New("task not found")
+	return tasks, nil
 }
 
-func CreateTask(input models.Task) models.Task {
+// GetTaskByID retrieves a single task by its ID
+func GetTaskByID(id int) (models.Task, error) {
+	
+	
+	var task models.Task
+	err := taskCollection.FindOne(context.Background(), bson.M{"id": id}).Decode(&task)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return models.Task{}, errors.New("task not found")
+		}
+		return models.Task{}, err
+	}
 
-	tasksMu.Lock()
-	defer tasksMu.Unlock()
+	return task, nil
+}
 
-	lastID++
+
+func CreateTask(input models.Task) (models.Task, error) {
+	lastID++ 
 	input.ID = lastID
-	input.CreatedAt = time.Now()
-	input.UpdatedAt = input.CreatedAt
+
+	now := time.Now()
+	input.CreatedAt = now
+	input.UpdatedAt = now
 
 	if input.DueDate.IsZero() {
-		input.DueDate = input.CreatedAt
+		input.DueDate = now
 	}
 
-	models.Tasks = append(models.Tasks, input)
-	return input
+	res, err := taskCollection.InsertOne(context.Background(), input)
+	if err != nil {
+		return models.Task{}, err
+	}
 
+	input.MongoID = res.InsertedID.(primitive.ObjectID).Hex()
+	return input, nil
 }
+
 
 func UpdateTask(id int, update models.Task) (models.Task, error) {
-
-	tasksMu.Lock()
-	defer tasksMu.Unlock()
-
-	for i, task := range models.Tasks {
-		if task.ID == id {
-
-			update.ID = id
-			update.CreatedAt = task.CreatedAt
-			update.UpdatedAt = time.Now()
-
-			if update.DueDate.IsZero() {
-				update.DueDate = task.DueDate
-			}
-			models.Tasks[i] = update
-			return models.Tasks[i], nil
-
+	
+	
+	var existing models.Task
+	err := taskCollection.FindOne(context.Background(), bson.M{"id": id}).Decode(&existing)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return models.Task{}, errors.New("task not found")
 		}
+		return models.Task{}, err
 	}
 
-	return models.Task{}, errors.New("task not found")
+	update.ID = id
+	update.CreatedAt = existing.CreatedAt
+	update.UpdatedAt = time.Now()
+	if update.DueDate.IsZero() {
+		update.DueDate = existing.DueDate
+	}
+
+	_, err = taskCollection.UpdateOne(
+		context.Background(),
+		bson.M{"id": id},
+		bson.M{"$set": update},
+	)
+	if err != nil {
+		return models.Task{}, err
+	}
+
+	return update, nil
 }
 
+// DeleteTask removes a task by ID
 func DeleteTask(id int) error {
-	tasksMu.Lock()
-	defer tasksMu.Unlock()
-
-	for i, task := range models.Tasks {
-		if id == task.ID {
-			models.Tasks = append(models.Tasks[:i], models.Tasks[i+1:]...)
-			return nil
-		}
+	
+	res, err := taskCollection.DeleteOne(context.Background(), bson.M{"id": id})
+	if err != nil {
+		return err
 	}
 
-	return errors.New("task not found")
+	if res.DeletedCount == 0 {
+		return errors.New("task not found")
+	}
+
+	return nil
 }
